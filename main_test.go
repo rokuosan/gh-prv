@@ -86,9 +86,18 @@ func TestCommentColumnWidth(t *testing.T) {
 func TestLinkText(t *testing.T) {
 	t.Parallel()
 
-	got := linkText("https://example.com", "label")
+	got := linkText("https://example.com", "label", true)
 	if !strings.Contains(got, "label") {
 		t.Fatalf("expected hyperlink text to include label, got %q", got)
+	}
+}
+
+func TestLinkTextDisabled(t *testing.T) {
+	t.Parallel()
+
+	got := linkText("https://example.com", "label", false)
+	if got != "label" {
+		t.Fatalf("expected plain label when hyperlinks are disabled, got %q", got)
 	}
 }
 
@@ -147,5 +156,17 @@ func TestParseCommentTargetArgsWithNodeID(t *testing.T) {
 	}
 	if wantJSON {
 		t.Fatal("expected wantJSON to be false")
+	}
+}
+
+func TestSupportsHyperlinksForceOverride(t *testing.T) {
+	t.Setenv("GH_PRV_FORCE_HYPERLINK", "1")
+	if !supportsHyperlinks() {
+		t.Fatal("expected force override to enable hyperlinks")
+	}
+
+	t.Setenv("GH_PRV_FORCE_HYPERLINK", "0")
+	if supportsHyperlinks() {
+		t.Fatal("expected force override to disable hyperlinks")
 	}
 }
