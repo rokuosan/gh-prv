@@ -9,9 +9,11 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"text/tabwriter"
 
 	"github.com/cli/go-gh/v2/pkg/api"
+	"github.com/jedib0t/go-pretty/v6/table"
+	"github.com/jedib0t/go-pretty/v6/text"
+	"golang.org/x/term"
 )
 
 var (
@@ -498,20 +500,45 @@ func summarize(body string) string {
 }
 
 func printCommentTable(items []outputComment) {
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "ID\tNODE_ID\tAUTHOR\tFILE\tLINE\tSUGGESTED\tCOMMENT")
+	width := stdoutWidth()
+	commentWidth := commentColumnWidth(width)
+
+	tw := table.NewWriter()
+	tw.SetStyle(table.StyleRounded)
+	tw.Style().Options.DrawBorder = false
+	tw.Style().Options.SeparateRows = true
+	tw.Style().Box.Left = ""
+	tw.Style().Box.Right = ""
+	tw.Style().Box.TopLeft = ""
+	tw.Style().Box.TopRight = ""
+	tw.Style().Box.BottomLeft = ""
+	tw.Style().Box.BottomRight = ""
+	tw.Style().Box.UnfinishedRow = ""
+	tw.SetOutputMirror(os.Stdout)
+	tw.AppendHeader(table.Row{"ID", "NODE_ID", "AUTHOR", "FILE", "LINE", "SUGGESTED", "COMMENT"})
+	tw.SetColumnConfigs([]table.ColumnConfig{
+		{Name: "ID", WidthMax: 12},
+		{Name: "NODE_ID", WidthMax: 22, WidthMaxEnforcer: text.WrapSoft},
+		{Name: "AUTHOR", WidthMax: 16, WidthMaxEnforcer: text.WrapSoft},
+		{Name: "FILE", WidthMax: 24, WidthMaxEnforcer: text.WrapSoft},
+		{Name: "LINE", WidthMax: 8, Align: text.AlignRight},
+		{Name: "SUGGESTED", WidthMax: 10},
+		{Name: "COMMENT", WidthMin: commentWidth, WidthMax: commentWidth},
+	})
+
 	for _, item := range items {
-		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%d\t%s\t%s\n",
-			item.ID,
-			item.NodeID,
+		tw.AppendRow(table.Row{
+			linkText(item.URL, strconv.FormatInt(item.ID, 10)),
+			linkText(item.URL, item.NodeID),
 			item.Author,
 			item.Path,
 			item.Line,
 			yesNo(item.HasSuggestion),
-			item.Summary,
-		)
+			hyperlinkWrappedText(item.URL, formatCommentForTable(item.Body), commentWidth),
+		})
 	}
-	_ = w.Flush()
+
+	_ = tw.Render()
 }
 
 func printCommentDetail(comment reviewComment) {
@@ -589,6 +616,64 @@ func yesNo(v bool) string {
 
 func usageError() error {
 	return errors.New("usage:\n  gh prv <PR URL> [--json] [--suggested]\n  gh prv show <COMMENT_ID|NODE_ID> [--json]\n  gh prv show <PR URL> <COMMENT_ID> [--json]\n  gh prv diff <COMMENT_ID|NODE_ID> [--json]\n  gh prv diff <PR URL> <COMMENT_ID> [--json]")
+}
+
+func formatCommentForTable(body string) string {
+	return strings.Join(strings.Fields(strings.TrimSpace(body)), " ")
+}
+
+func wrapCommentForTable(body string, width int) string {
+	return text.WrapSoft(formatCommentForTable(body), width)
+}
+
+func linkText(url, label string) string {
+	if url == "" || label == "" {
+		return label
+	}
+	return text.Hyperlink(url, label)
+}
+
+func hyperlinkWrappedText(url, label string, width int) string {
+	if label == "" {
+		return ""
+	}
+
+	lines := strings.Split(wrapCommentForTable(label, width), "\n")
+	for i, line := range lines {
+		lines[i] = linkText(url, strings.TrimRight(line, " "))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func commentColumnWidth(totalWidth int) int {
+	const fixedColumns = 12 + 22 + 16 + 24 + 8 + 10
+	const separatorsAndPadding = 36
+	return max(totalWidth-fixedColumns-separatorsAndPadding, 24)
+}
+
+func wrapCellContent(value string, width int, soft bool) string {
+	if width <= 0 || value == "" {
+		return value
+	}
+	if soft {
+		return text.WrapSoft(value, width)
+	}
+	return text.WrapText(value, width)
+}
+
+func stdoutWidth() int {
+	width, _, err := term.GetSize(int(os.Stdout.Fd()))
+	if err != nil || width <= 0 {
+		return 100
+	}
+	return width
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func isReviewCommentNodeID(v string) bool {
