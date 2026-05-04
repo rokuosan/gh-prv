@@ -170,3 +170,12 @@ func TestSupportsHyperlinksForceOverride(t *testing.T) {
 		t.Fatal("expected force override to disable hyperlinks")
 	}
 }
+
+func TestSupportsHyperlinksITerm(t *testing.T) {
+	if !supportsHyperlinksForEnv(map[string]string{
+		"TERM":         "xterm-256color",
+		"TERM_PROGRAM": "iTerm.app",
+	}) {
+		t.Fatal("expected iTerm2 to be treated as hyperlink-capable")
+	}
+}

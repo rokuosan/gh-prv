@@ -682,27 +682,43 @@ func supportsHyperlinks() bool {
 		return false
 	}
 
-	if os.Getenv("TERM") == "dumb" {
+	return supportsHyperlinksForEnv(getenv())
+}
+
+func supportsHyperlinksForEnv(env map[string]string) bool {
+	if env["TERM"] == "dumb" {
 		return false
 	}
 
-	if os.Getenv("WT_SESSION") != "" || os.Getenv("KITTY_WINDOW_ID") != "" || os.Getenv("WEZTERM_EXECUTABLE") != "" || os.Getenv("GHOSTTY_RESOURCES_DIR") != "" {
+	if env["WT_SESSION"] != "" || env["KITTY_WINDOW_ID"] != "" || env["WEZTERM_EXECUTABLE"] != "" || env["GHOSTTY_RESOURCES_DIR"] != "" {
 		return true
 	}
 
-	if v := strings.ToLower(os.Getenv("TERM_PROGRAM")); v == "vscode" || v == "wezterm" || v == "ghostty" || v == "hyper" {
+	if v := strings.ToLower(env["TERM_PROGRAM"]); v == "vscode" || v == "wezterm" || v == "ghostty" || v == "hyper" || v == "iterm.app" {
 		return true
 	}
 
-	if os.Getenv("VTE_VERSION") != "" {
+	if env["VTE_VERSION"] != "" {
 		return true
 	}
 
-	if strings.Contains(strings.ToLower(os.Getenv("TERM")), "xterm-kitty") {
+	if strings.Contains(strings.ToLower(env["TERM"]), "xterm-kitty") {
 		return true
 	}
 
 	return false
+}
+
+func getenv() map[string]string {
+	return map[string]string{
+		"TERM":                  os.Getenv("TERM"),
+		"WT_SESSION":            os.Getenv("WT_SESSION"),
+		"KITTY_WINDOW_ID":       os.Getenv("KITTY_WINDOW_ID"),
+		"WEZTERM_EXECUTABLE":    os.Getenv("WEZTERM_EXECUTABLE"),
+		"GHOSTTY_RESOURCES_DIR": os.Getenv("GHOSTTY_RESOURCES_DIR"),
+		"TERM_PROGRAM":          os.Getenv("TERM_PROGRAM"),
+		"VTE_VERSION":           os.Getenv("VTE_VERSION"),
+	}
 }
 
 func max(a, b int) int {
