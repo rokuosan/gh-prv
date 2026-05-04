@@ -2,6 +2,7 @@ package main
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -42,6 +43,67 @@ func TestSummarizeReplacesSuggestionBlock(t *testing.T) {
 	want := "please update this [suggestion] and keep behavior"
 	if got != want {
 		t.Fatalf("summarize mismatch: got %q want %q", got, want)
+	}
+}
+
+func TestFormatCommentForTable(t *testing.T) {
+	t.Parallel()
+
+	body := "first line\n\nsecond\tline  with   spaces"
+	got := formatCommentForTable(body)
+	want := "first line second line with spaces"
+	if got != want {
+		t.Fatalf("formatCommentForTable mismatch: got %q want %q", got, want)
+	}
+}
+
+func TestWrapCommentForTable(t *testing.T) {
+	t.Parallel()
+
+	got := wrapCommentForTable("alpha beta gamma delta", 10)
+	if !strings.Contains(got, "\n") {
+		t.Fatalf("expected wrapped text to contain newline, got %q", got)
+	}
+	if strings.Join(strings.Fields(strings.ReplaceAll(got, "\n", " ")), " ") != "alpha beta gamma delta" {
+		t.Fatalf("expected wrapped text to preserve content, got %q", got)
+	}
+}
+
+func TestCommentColumnWidth(t *testing.T) {
+	t.Parallel()
+
+	got := commentColumnWidth(120)
+	if got != 24 {
+		t.Fatalf("unexpected narrow width: got %d want 24", got)
+	}
+
+	got = commentColumnWidth(180)
+	if got != 52 {
+		t.Fatalf("unexpected wide width: got %d want 52", got)
+	}
+}
+
+func TestLinkText(t *testing.T) {
+	t.Parallel()
+
+	got := linkText("https://example.com", "label")
+	if !strings.Contains(got, "label") {
+		t.Fatalf("expected hyperlink text to include label, got %q", got)
+	}
+}
+
+func TestCommentChangedFilesURL(t *testing.T) {
+	t.Parallel()
+
+	comment := reviewComment{
+		ID:      3179628813,
+		HTMLURL: "https://github.com/rokuosan/al/pull/1#discussion_r3179628813",
+	}
+
+	got := commentChangedFilesURL(comment)
+	want := "https://github.com/rokuosan/al/pull/1/changes#r3179628813"
+	if got != want {
+		t.Fatalf("commentChangedFilesURL mismatch: got %q want %q", got, want)
 	}
 }
 
