@@ -426,7 +426,7 @@ func toOutputComment(comment reviewComment) outputComment {
 		HasSuggestion:    len(suggestions) > 0 || len(codeBlocks) > 0,
 		SuggestionBlocks: suggestions,
 		CodeBlocks:       codeBlocks,
-		URL:              commentChangedFilesURL(comment),
+		URL:              comment.HTMLURL,
 	}
 }
 
@@ -620,27 +620,6 @@ func usageError() error {
 
 func formatCommentForTable(body string) string {
 	return strings.Join(strings.Fields(strings.TrimSpace(body)), " ")
-}
-
-func commentChangedFilesURL(comment reviewComment) string {
-	if comment.ID == 0 || comment.HTMLURL == "" {
-		return comment.HTMLURL
-	}
-
-	if idx := strings.Index(comment.HTMLURL, "/pull/"); idx >= 0 {
-		base := comment.HTMLURL[:idx]
-		rest := comment.HTMLURL[idx:]
-		if anchorIdx := strings.Index(rest, "#"); anchorIdx >= 0 {
-			rest = rest[:anchorIdx]
-		}
-
-		parts := strings.Split(strings.TrimPrefix(rest, "/pull/"), "/")
-		if len(parts) >= 1 && parts[0] != "" {
-			return fmt.Sprintf("%s/pull/%s/changes#r%d", base, parts[0], comment.ID)
-		}
-	}
-
-	return comment.HTMLURL
 }
 
 func wrapCommentForTable(body string, width int) string {

@@ -92,7 +92,7 @@ func TestLinkText(t *testing.T) {
 	}
 }
 
-func TestCommentChangedFilesURL(t *testing.T) {
+func TestToOutputCommentPreservesHTMLURL(t *testing.T) {
 	t.Parallel()
 
 	comment := reviewComment{
@@ -100,10 +100,9 @@ func TestCommentChangedFilesURL(t *testing.T) {
 		HTMLURL: "https://github.com/rokuosan/al/pull/1#discussion_r3179628813",
 	}
 
-	got := commentChangedFilesURL(comment)
-	want := "https://github.com/rokuosan/al/pull/1/changes#r3179628813"
-	if got != want {
-		t.Fatalf("commentChangedFilesURL mismatch: got %q want %q", got, want)
+	got := toOutputComment(comment)
+	if got.URL != comment.HTMLURL {
+		t.Fatalf("expected HTMLURL to be preserved: got %q want %q", got.URL, comment.HTMLURL)
 	}
 }
 
