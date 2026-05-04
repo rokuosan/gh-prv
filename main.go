@@ -502,6 +502,7 @@ func summarize(body string) string {
 func printCommentTable(items []outputComment) {
 	width := stdoutWidth()
 	commentWidth := commentColumnWidth(width)
+	hyperlinks := supportsHyperlinks()
 
 	tw := table.NewWriter()
 	tw.SetStyle(table.StyleRounded)
@@ -528,13 +529,13 @@ func printCommentTable(items []outputComment) {
 
 	for _, item := range items {
 		tw.AppendRow(table.Row{
-			linkText(item.URL, strconv.FormatInt(item.ID, 10)),
-			linkText(item.URL, item.NodeID),
+			linkText(item.URL, strconv.FormatInt(item.ID, 10), hyperlinks),
+			linkText(item.URL, item.NodeID, hyperlinks),
 			item.Author,
 			item.Path,
 			item.Line,
 			yesNo(item.HasSuggestion),
-			hyperlinkWrappedText(item.URL, formatCommentForTable(item.Body), commentWidth),
+			hyperlinkWrappedText(item.URL, formatCommentForTable(item.Body), commentWidth, hyperlinks),
 		})
 	}
 
@@ -626,21 +627,21 @@ func wrapCommentForTable(body string, width int) string {
 	return text.WrapSoft(formatCommentForTable(body), width)
 }
 
-func linkText(url, label string) string {
-	if url == "" || label == "" {
+func linkText(url, label string, enabled bool) string {
+	if url == "" || label == "" || !enabled {
 		return label
 	}
 	return text.Hyperlink(url, label)
 }
 
-func hyperlinkWrappedText(url, label string, width int) string {
+func hyperlinkWrappedText(url, label string, width int, enabled bool) string {
 	if label == "" {
 		return ""
 	}
 
 	lines := strings.Split(wrapCommentForTable(label, width), "\n")
 	for i, line := range lines {
-		lines[i] = linkText(url, strings.TrimRight(line, " "))
+		lines[i] = linkText(url, strings.TrimRight(line, " "), enabled)
 	}
 	return strings.Join(lines, "\n")
 }
@@ -667,6 +668,57 @@ func stdoutWidth() int {
 		return 100
 	}
 	return width
+}
+
+func supportsHyperlinks() bool {
+	switch strings.ToLower(os.Getenv("GH_PRV_FORCE_HYPERLINK")) {
+	case "1", "true", "yes":
+		return true
+	case "0", "false", "no":
+		return false
+	}
+
+	if !term.IsTerminal(int(os.Stdout.Fd())) {
+		return false
+	}
+
+	return supportsHyperlinksForEnv(getenv())
+}
+
+func supportsHyperlinksForEnv(env map[string]string) bool {
+	if env["TERM"] == "dumb" {
+		return false
+	}
+
+	if env["WT_SESSION"] != "" || env["KITTY_WINDOW_ID"] != "" || env["WEZTERM_EXECUTABLE"] != "" || env["GHOSTTY_RESOURCES_DIR"] != "" {
+		return true
+	}
+
+	if v := strings.ToLower(env["TERM_PROGRAM"]); v == "vscode" || v == "wezterm" || v == "ghostty" || v == "hyper" || v == "iterm.app" {
+		return true
+	}
+
+	if env["VTE_VERSION"] != "" {
+		return true
+	}
+
+	if strings.Contains(strings.ToLower(env["TERM"]), "xterm-kitty") {
+		return true
+	}
+
+	return false
+}
+
+func getenv() map[string]string {
+	return map[string]string{
+		"TERM":                  os.Getenv("TERM"),
+		"WT_SESSION":            os.Getenv("WT_SESSION"),
+		"KITTY_WINDOW_ID":       os.Getenv("KITTY_WINDOW_ID"),
+		"WEZTERM_EXECUTABLE":    os.Getenv("WEZTERM_EXECUTABLE"),
+		"GHOSTTY_RESOURCES_DIR": os.Getenv("GHOSTTY_RESOURCES_DIR"),
+		"TERM_PROGRAM":          os.Getenv("TERM_PROGRAM"),
+		"VTE_VERSION":           os.Getenv("VTE_VERSION"),
+	}
 }
 
 func max(a, b int) int {
