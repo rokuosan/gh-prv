@@ -218,3 +218,50 @@ func TestMergeThreadMetadata(t *testing.T) {
 		t.Fatalf("expected second comment to receive metadata: %+v", comments[1].Thread)
 	}
 }
+
+func TestPopulateThreadCommentMetadata(t *testing.T) {
+	t.Parallel()
+
+	metadata := make(map[string]reviewThreadMetadata)
+	base := reviewThreadMetadata{
+		ThreadID: "PRRT_thread",
+		Resolved: true,
+		Outdated: false,
+	}
+
+	populateThreadCommentMetadata(metadata, base, []struct {
+		ID                string `json:"id"`
+		DatabaseID        int64  `json:"databaseId"`
+		PullRequestReview *struct {
+			ID         string `json:"id"`
+			DatabaseID int64  `json:"databaseId"`
+		} `json:"pullRequestReview"`
+		ReplyTo *struct {
+			ID         string `json:"id"`
+			DatabaseID int64  `json:"databaseId"`
+		} `json:"replyTo"`
+	}{
+		{
+			ID: "PRRC_a",
+			PullRequestReview: &struct {
+				ID         string `json:"id"`
+				DatabaseID int64  `json:"databaseId"`
+			}{ID: "PRR_1", DatabaseID: 1},
+			ReplyTo: &struct {
+				ID         string `json:"id"`
+				DatabaseID int64  `json:"databaseId"`
+			}{ID: "PRRC_parent", DatabaseID: 2},
+		},
+	})
+
+	got, ok := metadata["PRRC_a"]
+	if !ok {
+		t.Fatal("expected metadata entry for PRRC_a")
+	}
+	if got.ThreadID != "PRRT_thread" || !got.Resolved || got.Outdated {
+		t.Fatalf("unexpected base metadata: %+v", got)
+	}
+	if got.ReviewID == nil || *got.ReviewID != 1 || got.ReplyToID == nil || *got.ReplyToID != 2 {
+		t.Fatalf("expected review/reply metadata to be populated: %+v", got)
+	}
+}

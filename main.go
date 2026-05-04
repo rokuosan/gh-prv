@@ -378,6 +378,10 @@ func listReviewThreadMetadata(client *api.GraphQLClient, pr prRef) (map[string]r
 	                databaseId
 	              }
 	            }
+	            pageInfo {
+	              hasNextPage
+	              endCursor
+	            }
 	          }
 	        }
 	        pageInfo {
@@ -413,6 +417,10 @@ func listReviewThreadMetadata(client *api.GraphQLClient, pr prRef) (map[string]r
 										DatabaseID int64  `json:"databaseId"`
 									} `json:"replyTo"`
 								} `json:"nodes"`
+								PageInfo struct {
+									HasNextPage bool    `json:"hasNextPage"`
+									EndCursor   *string `json:"endCursor"`
+								} `json:"pageInfo"`
 							} `json:"comments"`
 						} `json:"nodes"`
 						PageInfo struct {
@@ -438,21 +446,17 @@ func listReviewThreadMetadata(client *api.GraphQLClient, pr prRef) (map[string]r
 		}
 
 		for _, thread := range response.Repository.PullRequest.ReviewThreads.Nodes {
-			for _, comment := range thread.Comments.Nodes {
-				item := reviewThreadMetadata{
-					ThreadID: thread.ID,
-					Resolved: thread.IsResolved,
-					Outdated: thread.IsOutdated,
+			baseMetadata := reviewThreadMetadata{
+				ThreadID: thread.ID,
+				Resolved: thread.IsResolved,
+				Outdated: thread.IsOutdated,
+			}
+			populateThreadCommentMetadata(metadata, baseMetadata, thread.Comments.Nodes)
+
+			if thread.Comments.PageInfo.HasNextPage {
+				if err := appendPaginatedThreadCommentMetadata(client, metadata, baseMetadata, thread.ID, thread.Comments.PageInfo.EndCursor); err != nil {
+					return nil, err
 				}
-				if comment.PullRequestReview != nil {
-					item.ReviewID = new(int64(comment.PullRequestReview.DatabaseID))
-					item.ReviewNodeID = comment.PullRequestReview.ID
-				}
-				if comment.ReplyTo != nil {
-					item.ReplyToID = new(int64(comment.ReplyTo.DatabaseID))
-					item.ReplyToNodeID = comment.ReplyTo.ID
-				}
-				metadata[comment.ID] = item
 			}
 		}
 
@@ -463,6 +467,99 @@ func listReviewThreadMetadata(client *api.GraphQLClient, pr prRef) (map[string]r
 	}
 
 	return metadata, nil
+}
+
+func appendPaginatedThreadCommentMetadata(client *api.GraphQLClient, metadata map[string]reviewThreadMetadata, baseMetadata reviewThreadMetadata, threadID string, after *string) error {
+	const query = `
+	query($id: ID!, $after: String) {
+	  node(id: $id) {
+	    ... on PullRequestReviewThread {
+	      comments(first: 100, after: $after) {
+	        nodes {
+	          id
+	          databaseId
+	          pullRequestReview {
+	            id
+	            databaseId
+	          }
+	          replyTo {
+	            id
+	            databaseId
+	          }
+	        }
+	        pageInfo {
+	          hasNextPage
+	          endCursor
+	        }
+	      }
+	    }
+	  }
+	}`
+
+	for {
+		var response struct {
+			Node *struct {
+				Comments struct {
+					Nodes []struct {
+						ID                string `json:"id"`
+						DatabaseID        int64  `json:"databaseId"`
+						PullRequestReview *struct {
+							ID         string `json:"id"`
+							DatabaseID int64  `json:"databaseId"`
+						} `json:"pullRequestReview"`
+						ReplyTo *struct {
+							ID         string `json:"id"`
+							DatabaseID int64  `json:"databaseId"`
+						} `json:"replyTo"`
+					} `json:"nodes"`
+					PageInfo struct {
+						HasNextPage bool    `json:"hasNextPage"`
+						EndCursor   *string `json:"endCursor"`
+					} `json:"pageInfo"`
+				} `json:"comments"`
+			} `json:"node"`
+		}
+
+		if err := client.Do(query, map[string]interface{}{"id": threadID, "after": after}, &response); err != nil {
+			return err
+		}
+		if response.Node == nil {
+			return fmt.Errorf("review thread not found for node ID %q", threadID)
+		}
+
+		populateThreadCommentMetadata(metadata, baseMetadata, response.Node.Comments.Nodes)
+
+		if !response.Node.Comments.PageInfo.HasNextPage || response.Node.Comments.PageInfo.EndCursor == nil {
+			return nil
+		}
+		after = response.Node.Comments.PageInfo.EndCursor
+	}
+}
+
+func populateThreadCommentMetadata(metadata map[string]reviewThreadMetadata, baseMetadata reviewThreadMetadata, comments []struct {
+	ID                string `json:"id"`
+	DatabaseID        int64  `json:"databaseId"`
+	PullRequestReview *struct {
+		ID         string `json:"id"`
+		DatabaseID int64  `json:"databaseId"`
+	} `json:"pullRequestReview"`
+	ReplyTo *struct {
+		ID         string `json:"id"`
+		DatabaseID int64  `json:"databaseId"`
+	} `json:"replyTo"`
+}) {
+	for _, comment := range comments {
+		item := baseMetadata
+		if comment.PullRequestReview != nil {
+			item.ReviewID = new(int64(comment.PullRequestReview.DatabaseID))
+			item.ReviewNodeID = comment.PullRequestReview.ID
+		}
+		if comment.ReplyTo != nil {
+			item.ReplyToID = new(int64(comment.ReplyTo.DatabaseID))
+			item.ReplyToNodeID = comment.ReplyTo.ID
+		}
+		metadata[comment.ID] = item
+	}
 }
 
 func mergeThreadMetadata(comments []reviewComment, metadata map[string]reviewThreadMetadata) {
