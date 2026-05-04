@@ -107,11 +107,23 @@ func TestToOutputCommentPreservesHTMLURL(t *testing.T) {
 	comment := reviewComment{
 		ID:      3179628813,
 		HTMLURL: "https://github.com/rokuosan/al/pull/1#discussion_r3179628813",
+		Thread: reviewThreadMetadata{
+			ThreadID:      "PRRT_kwDO123",
+			Resolved:      true,
+			Outdated:      false,
+			ReviewID:      new(int64(42)),
+			ReviewNodeID:  "PRR_kwDO42",
+			ReplyToID:     new(int64(7)),
+			ReplyToNodeID: "PRRC_kwDO7",
+		},
 	}
 
 	got := toOutputComment(comment)
 	if got.URL != comment.HTMLURL {
 		t.Fatalf("expected HTMLURL to be preserved: got %q want %q", got.URL, comment.HTMLURL)
+	}
+	if got.ThreadID != "PRRT_kwDO123" || !got.Resolved || got.Outdated || got.ReviewID == nil || *got.ReviewID != 42 || got.ReplyToID == nil || *got.ReplyToID != 7 {
+		t.Fatalf("expected thread metadata to be preserved in output comment: %+v", got)
 	}
 }
 
@@ -177,5 +189,32 @@ func TestSupportsHyperlinksITerm(t *testing.T) {
 		"TERM_PROGRAM": "iTerm.app",
 	}) {
 		t.Fatal("expected iTerm2 to be treated as hyperlink-capable")
+	}
+}
+
+func TestMergeThreadMetadata(t *testing.T) {
+	t.Parallel()
+
+	comments := []reviewComment{
+		{NodeID: "PRRC_a"},
+		{NodeID: "PRRC_b"},
+	}
+	metadata := map[string]reviewThreadMetadata{
+		"PRRC_b": {
+			ThreadID:     "PRRT_thread",
+			Resolved:     true,
+			Outdated:     true,
+			ReviewID:     new(int64(123)),
+			ReviewNodeID: "PRR_123",
+		},
+	}
+
+	mergeThreadMetadata(comments, metadata)
+
+	if comments[0].Thread.ThreadID != "" {
+		t.Fatalf("expected first comment to remain without metadata: %+v", comments[0].Thread)
+	}
+	if comments[1].Thread.ThreadID != "PRRT_thread" || !comments[1].Thread.Resolved || !comments[1].Thread.Outdated {
+		t.Fatalf("expected second comment to receive metadata: %+v", comments[1].Thread)
 	}
 }

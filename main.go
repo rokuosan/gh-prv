@@ -40,6 +40,7 @@ type reviewComment struct {
 	User         struct {
 		Login string `json:"login"`
 	} `json:"user"`
+	Thread reviewThreadMetadata `json:"-"`
 }
 
 type outputComment struct {
@@ -54,6 +55,23 @@ type outputComment struct {
 	SuggestionBlocks []string `json:"suggestion_blocks,omitempty"`
 	CodeBlocks       []string `json:"code_blocks,omitempty"`
 	URL              string   `json:"url"`
+	ThreadID         string   `json:"thread_id,omitempty"`
+	Resolved         bool     `json:"resolved"`
+	Outdated         bool     `json:"outdated"`
+	ReviewID         *int64   `json:"review_id,omitempty"`
+	ReviewNodeID     string   `json:"review_node_id,omitempty"`
+	ReplyToID        *int64   `json:"reply_to_id,omitempty"`
+	ReplyToNodeID    string   `json:"reply_to_node_id,omitempty"`
+}
+
+type reviewThreadMetadata struct {
+	ThreadID      string
+	Resolved      bool
+	Outdated      bool
+	ReviewID      *int64
+	ReviewNodeID  string
+	ReplyToID     *int64
+	ReplyToNodeID string
 }
 
 type cachedCommentRef struct {
@@ -107,6 +125,19 @@ func runList(args []string) error {
 	comments, err := listReviewComments(client, parsed)
 	if err != nil {
 		return err
+	}
+
+	if wantJSON {
+		graphQLClient, err := api.DefaultGraphQLClient()
+		if err != nil {
+			return err
+		}
+
+		threadMetadata, err := listReviewThreadMetadata(graphQLClient, parsed)
+		if err != nil {
+			return err
+		}
+		mergeThreadMetadata(comments, threadMetadata)
 	}
 
 	items := make([]outputComment, 0, len(comments))
@@ -324,6 +355,124 @@ func listReviewComments(client *api.RESTClient, pr prRef) ([]reviewComment, erro
 	return all, nil
 }
 
+func listReviewThreadMetadata(client *api.GraphQLClient, pr prRef) (map[string]reviewThreadMetadata, error) {
+	const query = `
+	query($owner: String!, $repo: String!, $number: Int!, $after: String) {
+	  repository(owner: $owner, name: $repo) {
+	    pullRequest(number: $number) {
+	      reviewThreads(first: 100, after: $after) {
+	        nodes {
+	          id
+	          isResolved
+	          isOutdated
+	          comments(first: 100) {
+	            nodes {
+	              id
+	              databaseId
+	              pullRequestReview {
+	                id
+	                databaseId
+	              }
+	              replyTo {
+	                id
+	                databaseId
+	              }
+	            }
+	          }
+	        }
+	        pageInfo {
+	          hasNextPage
+	          endCursor
+	        }
+	      }
+	    }
+	  }
+	}`
+
+	var after *string
+	metadata := make(map[string]reviewThreadMetadata)
+	for {
+		var response struct {
+			Repository *struct {
+				PullRequest *struct {
+					ReviewThreads struct {
+						Nodes []struct {
+							ID         string `json:"id"`
+							IsResolved bool   `json:"isResolved"`
+							IsOutdated bool   `json:"isOutdated"`
+							Comments   struct {
+								Nodes []struct {
+									ID                string `json:"id"`
+									DatabaseID        int64  `json:"databaseId"`
+									PullRequestReview *struct {
+										ID         string `json:"id"`
+										DatabaseID int64  `json:"databaseId"`
+									} `json:"pullRequestReview"`
+									ReplyTo *struct {
+										ID         string `json:"id"`
+										DatabaseID int64  `json:"databaseId"`
+									} `json:"replyTo"`
+								} `json:"nodes"`
+							} `json:"comments"`
+						} `json:"nodes"`
+						PageInfo struct {
+							HasNextPage bool    `json:"hasNextPage"`
+							EndCursor   *string `json:"endCursor"`
+						} `json:"pageInfo"`
+					} `json:"reviewThreads"`
+				} `json:"pullRequest"`
+			} `json:"repository"`
+		}
+
+		variables := map[string]interface{}{
+			"owner":  pr.Owner,
+			"repo":   pr.Repo,
+			"number": pr.Number,
+			"after":  after,
+		}
+		if err := client.Do(query, variables, &response); err != nil {
+			return nil, err
+		}
+		if response.Repository == nil || response.Repository.PullRequest == nil {
+			return nil, fmt.Errorf("pull request not found for %s/%s#%d", pr.Owner, pr.Repo, pr.Number)
+		}
+
+		for _, thread := range response.Repository.PullRequest.ReviewThreads.Nodes {
+			for _, comment := range thread.Comments.Nodes {
+				item := reviewThreadMetadata{
+					ThreadID: thread.ID,
+					Resolved: thread.IsResolved,
+					Outdated: thread.IsOutdated,
+				}
+				if comment.PullRequestReview != nil {
+					item.ReviewID = new(int64(comment.PullRequestReview.DatabaseID))
+					item.ReviewNodeID = comment.PullRequestReview.ID
+				}
+				if comment.ReplyTo != nil {
+					item.ReplyToID = new(int64(comment.ReplyTo.DatabaseID))
+					item.ReplyToNodeID = comment.ReplyTo.ID
+				}
+				metadata[comment.ID] = item
+			}
+		}
+
+		if !response.Repository.PullRequest.ReviewThreads.PageInfo.HasNextPage || response.Repository.PullRequest.ReviewThreads.PageInfo.EndCursor == nil {
+			break
+		}
+		after = response.Repository.PullRequest.ReviewThreads.PageInfo.EndCursor
+	}
+
+	return metadata, nil
+}
+
+func mergeThreadMetadata(comments []reviewComment, metadata map[string]reviewThreadMetadata) {
+	for i := range comments {
+		if item, ok := metadata[comments[i].NodeID]; ok {
+			comments[i].Thread = item
+		}
+	}
+}
+
 func getReviewComment(client *api.RESTClient, pr prRef, id int64) (reviewComment, error) {
 	path := fmt.Sprintf("repos/%s/%s/pulls/comments/%d", pr.Owner, pr.Repo, id)
 	var comment reviewComment
@@ -427,6 +576,13 @@ func toOutputComment(comment reviewComment) outputComment {
 		SuggestionBlocks: suggestions,
 		CodeBlocks:       codeBlocks,
 		URL:              comment.HTMLURL,
+		ThreadID:         comment.Thread.ThreadID,
+		Resolved:         comment.Thread.Resolved,
+		Outdated:         comment.Thread.Outdated,
+		ReviewID:         comment.Thread.ReviewID,
+		ReviewNodeID:     comment.Thread.ReviewNodeID,
+		ReplyToID:        comment.Thread.ReplyToID,
+		ReplyToNodeID:    comment.Thread.ReplyToNodeID,
 	}
 }
 
